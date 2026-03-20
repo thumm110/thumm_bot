@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+
+.venv/
+venv/
+
+data/raw_markets/
+data/markets_latest.json
+data/recent_markets.json
+data/log.json
+data/outcomes.json
+data/paper_trades.json
