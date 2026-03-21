@@ -30,7 +30,14 @@ def main():
 
     filled_trades = [trade for trade in paper_trades if trade.get("status") == "paper_filled"]
     blocked_trades = [trade for trade in paper_trades if trade.get("status") == "paper_blocked"]
+    exit_trades = [trade for trade in paper_trades if trade.get("status") == "paper_exit_filled"]
     blocked_reasons = Counter(trade.get("reason", "unknown") for trade in blocked_trades)
+    exit_trades_by_ticker = {}
+    for trade in exit_trades:
+        ticker = trade.get("ticker")
+        if not ticker:
+            continue
+        exit_trades_by_ticker.setdefault(ticker, []).append(trade)
 
     resolved_rows = []
     unresolved_fills = 0
@@ -43,8 +50,26 @@ def main():
             continue
 
         resolved_outcome = outcome_entry.get("resolved_outcome")
-        pnl_dollars = trade_pnl_dollars(trade, resolved_outcome)
-        if pnl_dollars is None:
+        prior_exits = exit_trades_by_ticker.get(ticker, [])
+        realized_exit_pnl = round(
+            sum(float(exit_trade.get("realized_pnl_dollars", 0) or 0) for exit_trade in prior_exits),
+            2,
+        )
+        exited_quantity = sum(int(exit_trade.get("quantity", 0) or 0) for exit_trade in prior_exits)
+        filled_quantity = int(trade.get("quantity", 0) or 0)
+        remaining_quantity = max(0, filled_quantity - exited_quantity)
+
+        pnl_dollars = realized_exit_pnl
+        if remaining_quantity > 0:
+            remaining_trade = dict(trade)
+            remaining_trade["quantity"] = remaining_quantity
+            unresolved_pnl = trade_pnl_dollars(remaining_trade, resolved_outcome)
+            if unresolved_pnl is None:
+                unresolved_fills += 1
+                continue
+            pnl_dollars = round(pnl_dollars + unresolved_pnl, 2)
+
+        if remaining_quantity <= 0 and not prior_exits and pnl_dollars == 0:
             unresolved_fills += 1
             continue
 
@@ -61,6 +86,7 @@ def main():
 
     print(f"Paper trades logged: {len(paper_trades)}")
     print(f"Paper fills: {len(filled_trades)}")
+    print(f"Paper exits: {len(exit_trades)}")
     print(f"Paper blocks: {len(blocked_trades)}")
     if blocked_reasons:
         print("Blocked reasons:")
