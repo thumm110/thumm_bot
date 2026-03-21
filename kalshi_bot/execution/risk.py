@@ -13,6 +13,7 @@ from kalshi_bot.config import (
     PAPER_MIN_SCORE,
     PAPER_PREFERRED_MAX_HOLD_HOURS,
     PAPER_POSITION_SIZE_DOLLARS,
+    PAPER_POSITION_SIZE_FLOOR_RATIO,
     PAPER_STARTING_BANKROLL_DOLLARS,
 )
 
@@ -22,6 +23,50 @@ def compute_contract_quantity(position_size_dollars, price_cents, decision):
     if entry_cost_cents is None or entry_cost_cents <= 0:
         return 0
     return max(1, int((position_size_dollars * 100) // entry_cost_cents))
+
+
+def _clamp(value, lower=0.0, upper=1.0):
+    return max(lower, min(upper, value))
+
+
+def target_position_size_dollars(signal: dict) -> float:
+    max_size = float(PAPER_POSITION_SIZE_DOLLARS)
+    min_size = round(max_size * PAPER_POSITION_SIZE_FLOOR_RATIO, 2)
+
+    score = float(signal.get("score", 0) or 0)
+    edge = float(signal.get("edge", 0) or 0)
+    spread = float(signal.get("spread", 0) or 0)
+    displayed_size = float(signal.get("displayed_size", 0) or 0)
+    volume = float(signal.get("volume", 0) or 0)
+    hours_to_close = _signal_hours_to_close(signal)
+
+    score_component = _clamp((score - PAPER_MIN_SCORE) / 60)
+    edge_component = _clamp(edge / 8)
+    spread_component = _clamp((8 - spread) / 8)
+    displayed_component = _clamp(displayed_size / 150)
+    volume_component = _clamp(volume / 3000)
+    liquidity_component = (displayed_component + volume_component) / 2
+
+    if hours_to_close is None:
+        horizon_component = 0.7
+    elif hours_to_close <= 6:
+        horizon_component = 1.0
+    elif hours_to_close <= 12:
+        horizon_component = 0.95
+    elif hours_to_close <= 24:
+        horizon_component = 0.85
+    else:
+        horizon_component = 0.6
+
+    conviction = (
+        score_component * 0.35
+        + edge_component * 0.2
+        + spread_component * 0.2
+        + liquidity_component * 0.25
+    )
+    sizing_ratio = _clamp(conviction * horizon_component)
+    position_size = max(min_size, round(max_size * sizing_ratio, 2))
+    return min(position_size, max_size)
 
 
 def paper_trade_notional_dollars(price_cents, quantity, decision):
@@ -181,7 +226,8 @@ def check_signal_risk(signal, current_run_trades, all_trades, trade_date, outcom
         if trade.get("event_ticker") and trade.get("event_ticker") == event_ticker:
             return False, "event_already_selected"
 
-    quantity = compute_contract_quantity(PAPER_POSITION_SIZE_DOLLARS, price, signal.get("decision"))
+    position_size_dollars = target_position_size_dollars(signal)
+    quantity = compute_contract_quantity(position_size_dollars, price, signal.get("decision"))
     notional = paper_trade_notional_dollars(price, quantity, signal.get("decision"))
     if notional <= 0:
         return False, "invalid_position_size"
