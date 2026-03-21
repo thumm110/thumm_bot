@@ -4,19 +4,21 @@ from kalshi_bot.analysis.backtest_metrics import (
     current_position_value_dollars,
     trade_mark_to_market_pnl_dollars,
 )
-from kalshi_bot.config import PAPER_POSITION_SIZE_DOLLARS, PAPER_TRADING_ENABLED
+from kalshi_bot.config import PAPER_TRADING_ENABLED
 from kalshi_bot.config import PAPER_TAKE_PROFIT_FULL_PCT, PAPER_TAKE_PROFIT_PARTIAL_PCT
 from kalshi_bot.execution.risk import (
     check_signal_risk,
     compute_contract_quantity,
     paper_trade_notional_dollars,
+    target_position_size_dollars,
 )
 
 
 def build_paper_trade(signal):
     price = signal.get("price")
     decision = signal.get("decision")
-    quantity = compute_contract_quantity(PAPER_POSITION_SIZE_DOLLARS, price, decision)
+    position_size_dollars = target_position_size_dollars(signal)
+    quantity = compute_contract_quantity(position_size_dollars, price, decision)
     notional = paper_trade_notional_dollars(price, quantity, decision)
     trade_time = datetime.now(timezone.utc).isoformat()
 
@@ -30,7 +32,7 @@ def build_paper_trade(signal):
         "hours_to_close": signal.get("hours_to_close"),
         "quantity": quantity,
         "notional_dollars": notional,
-        "position_size_dollars": PAPER_POSITION_SIZE_DOLLARS,
+        "position_size_dollars": position_size_dollars,
         "trade_time": trade_time,
         "trade_date": trade_time[:10],
         "status": "paper_filled",
@@ -91,6 +93,10 @@ def paper_exit_candidates(existing_trades, markets_by_ticker, resolved_tickers=N
             continue
 
         prior_exits = exits_by_ticker.get(ticker, [])
+        realized_exit_pnl = round(
+            sum(float(exit_trade.get("realized_pnl_dollars", 0) or 0) for exit_trade in prior_exits),
+            2,
+        )
         exited_quantity = sum(int(exit_trade.get("quantity", 0) or 0) for exit_trade in prior_exits)
         fill_quantity = int(trade.get("quantity", 0) or 0)
         remaining_quantity = fill_quantity - exited_quantity
@@ -119,16 +125,22 @@ def paper_exit_candidates(existing_trades, markets_by_ticker, resolved_tickers=N
             remaining_quantity,
             trade.get("decision"),
         )
-        if remaining_pnl is None or not remaining_notional:
+        original_notional = paper_trade_notional_dollars(
+            trade.get("price"),
+            fill_quantity,
+            trade.get("decision"),
+        )
+        if remaining_pnl is None or not remaining_notional or not original_notional:
             continue
 
-        roi = remaining_pnl / remaining_notional
+        cumulative_pnl = realized_exit_pnl + remaining_pnl
+        cumulative_roi = cumulative_pnl / original_notional
         has_partial_exit = any(
             str(exit_trade.get("reason", "")).startswith("take_profit_partial")
             for exit_trade in prior_exits
         )
 
-        if roi >= PAPER_TAKE_PROFIT_FULL_PCT:
+        if cumulative_roi >= PAPER_TAKE_PROFIT_FULL_PCT:
             exit_trades.append(
                 build_paper_exit(
                     trade,
@@ -139,7 +151,7 @@ def paper_exit_candidates(existing_trades, markets_by_ticker, resolved_tickers=N
             )
             continue
 
-        if roi >= PAPER_TAKE_PROFIT_PARTIAL_PCT and not has_partial_exit:
+        if cumulative_roi >= PAPER_TAKE_PROFIT_PARTIAL_PCT and not has_partial_exit:
             exit_quantity = max(1, remaining_quantity // 2)
             if exit_quantity >= remaining_quantity and remaining_quantity > 1:
                 exit_quantity = remaining_quantity - 1

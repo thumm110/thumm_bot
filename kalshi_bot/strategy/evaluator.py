@@ -1,6 +1,13 @@
 from datetime import datetime, timezone
 
-from kalshi_bot.config import EXCLUDE_PROVISIONAL, MIN_ORDERBOOK_SIZE, MIN_VOLUME
+from kalshi_bot.config import (
+    EXCLUDE_PROVISIONAL,
+    EXCLUDED_EVENT_TICKER_KEYWORDS,
+    EXCLUDED_EVENT_TICKER_PREFIXES,
+    MIN_ORDERBOOK_SIZE,
+    MIN_VOLUME,
+    PENALIZED_EVENT_TICKER_PREFIXES,
+)
 
 
 def _hours_to_close(close_time):
@@ -48,6 +55,12 @@ def evaluate_market(market, history=None):
             return None
 
         if EXCLUDE_PROVISIONAL and is_provisional:
+            return None
+
+        normalized_event_ticker = (event_ticker or "").upper()
+        if any(keyword in normalized_event_ticker for keyword in EXCLUDED_EVENT_TICKER_KEYWORDS):
+            return None
+        if any(normalized_event_ticker.startswith(prefix) for prefix in EXCLUDED_EVENT_TICKER_PREFIXES):
             return None
 
         if yes_bid is None or yes_ask is None:
@@ -115,6 +128,11 @@ def evaluate_market(market, history=None):
             score += 4
         else:
             score -= min((hours_to_close - 24) / 12, 18)
+
+        for prefix, penalty in PENALIZED_EVENT_TICKER_PREFIXES.items():
+            if normalized_event_ticker.startswith(prefix):
+                score -= penalty
+                break
 
         if history is not None:
             decisions = history.get(ticker, [])

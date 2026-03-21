@@ -26,11 +26,14 @@ Bias the bot toward shorter-duration paper trades while avoiding capital lock-up
 - No duplicate fill on the same event
 - Max deployment is 80% of capital base
 - More than 24 hour trades can only make up 20% of the open book
+- Position sizes scale with conviction and liquidity
+- Position size floor is 20% of max size
+- Position size cap is currently `$15`
 
 ### Exits
 
-- Partial trim at `+100%` ROI
-- Full exit at `+200%` ROI
+- Partial trim at `+100%` cumulative ROI
+- Full exit at `+200%` cumulative ROI
 - Resolved outcomes are refreshed from local snapshots first, then live API when available
 
 ## What We Learned From Initial Paper Runs
@@ -40,6 +43,8 @@ Bias the bot toward shorter-duration paper trades while avoiding capital lock-up
 - The strategy leaned too heavily toward `NO`
 - Lack of exit logic caused capital to sit unnecessarily
 - Incorrect `NO` cost basis accounting overstated some returns before it was fixed
+- `KXETH15M` and `KXBNB15M` underperformed enough to justify exclusion
+- `KXSOL15M` weakened enough to justify additional penalty pressure
 
 ## Known Weak Spots
 

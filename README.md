@@ -16,9 +16,10 @@
 - Prefers markets closing within 24 hours
 - Limits longer-dated exposure to a small share of open positions
 - Caps deployment at 80% of capital base instead of a fixed position count
+- Sizes positions dynamically from signal quality, with a 20% floor and a hard max of `$15`
 - Uses staged profit taking:
-  - trim at `+100%` ROI
-  - fully exit remaining size at `+200%` ROI
+  - trim at `+100%` cumulative ROI
+  - fully exit remaining size at `+200%` cumulative ROI
 
 ## Requirements
 
